@@ -3,106 +3,83 @@ import os
 
 import torch
 from torch.utils.data import Dataset
-
-class JetbotSensoryData(Dataset):
-    def __init__(self, root_paths):
-        
-        ### specific to jetbot ###
-        # chans = 3 (rgb)
-        # rows = 224 (resnet50 sensorium)
-        # cols = 224
-        # imu_dims = 6
-        ##########################
-        self.root_paths = root_paths
-
-        ##########################
-        # obs
-        image_size = 3*64*64 # resnet18 sensorium
-        imu_size = 6
-        imu = list(range(imu_size))
-        image = list(range(imu_size, imu_size + image_size))
-
-        self._images = []
-        self._imus = []
-        for path in root_paths:
-            obs_path = os.path.join(path, 'obs')
-            obs_files = os.listdir(obs_path)
-
-            for name in obs_files:
-                data = torch.from_numpy(np.load(os.path.join(obs_path, name)))
-                print(data.shape)
-                imus = data[:,imu]
-
-                self._images.append(data[:,image].reshape(-1, 64, 64, 3)/255.0)
-                self._imus.append(imus)
-        
-        self._images = torch.vstack(self._images)
-        self._imus = torch.vstack(self._imus)
-        
-        # standardize IMU data
-        self._imu_mean = torch.mean(self._imus, dim=0).unsqueeze(0)
-        self._imu_stdv = torch.std(self._imus, dim=0).unsqueeze(0)
-        self._imus = (self._imus - self._imu_mean) / self._imu_stdv
-        self._imus = torch.sigmoid(self._imus)
-
-        print(self._images.shape)
-        self._total_length = self._images.shape[0]
-
-        ##########################
-        # act
-        self._acts = []
-
-        for path in root_paths:
-            act_path = os.path.join(path, 'act')
-            act_files = os.listdir(act_path)
-            for name in act_files:
-                data = torch.from_numpy(np.load(os.path.join(act_path, name)))
-                self._acts.append(data)
-        
-        self._acts = torch.vstack(self._acts)
-
-        ##########################
-        # truth
-        self._truths = []
-        self._num_runs = 0
-        for i, path in enumerate(root_paths):
-            truth_path = os.path.join(path, 'truth')
-            truth_files = os.listdir(truth_path)
-            for j, name in enumerate(truth_files):
-                data = torch.from_numpy(np.load(os.path.join(truth_path, name)))
-                index = self._num_runs*torch.ones((data.shape[0],1)).int()
-                data = torch.hstack((index, data))
-                self._truths.append(data)
-                self._num_runs += 1
-        
-        self._truths = torch.vstack(self._truths)
-
-        assert self._total_length == self._acts.shape[0] == self._truths.shape[0]
-    
-    def __getitem__(self, index):
-        image = torch.permute(self._images[index],(2,0,1)).float()
-        return image, self._imus[index], self._acts[index], self._truths[index]
-    
-    def __len__(self):
-        return self._total_length
-
-
 class SensoryData(Dataset):
-    def __init__(self, root_paths):
+    def __init__(self, root_paths, rows=100, cols=100, chans=3, num_images=2, add_dims=6):
         
-        ### specific to carter_v2_3 ###
+        ### specific to carter_Nova ###
         # chans = 6 (two stacked images)
         # rows = 100
         # cols = 100
         # imu_dims = 6
         ##########################
         
-        self.root_paths = root_paths
-
+        self._root_paths = root_paths
+        self._rows = rows
+        self._cols = cols
+        self._chans = chans
+        self._num_images = num_images
+        self._add_dims = add_dims
         ##########################
         # obs
-        image_size = 3*100*100
-        imu_size = 6
+
+        # Assume that a single obs token consists of a sequence of flattened images
+        # prepended by "additional_dims" of float data. Assume one file is a "batch"
+        # of obs tokens. 
+
+        # PER FILE [batch_length, add_dims + image_size * num_images]
+
+        image_size = self._rows*self._cols*self._chans
+        image_idx = [list(range(self._add_dims + i*image_size, self._add_dims + i*image_size + image_size)) for i in range(self._num_images)]
+        self._images = []
+
+        add_idx = list(range(self.add_dims))
+        self._add_data = []
+
+        # Assume root directory is structured like the following 
+        #
+        #    root_path
+        #        |
+        #        -- obs
+        #        |   |
+        #        |   -- obs_data_0.npy
+        #        |   -- obs_data_1.npy
+        #        |   -- obs_data_2.npy
+        #        -- act
+        #        |   |
+        #        |   -- act_data_0.npy
+        #        |   -- act_data_1.npy
+        #        |   -- act_data_2.npy
+        #        -- truth
+        #        |   |
+        #        |   -- truth_data_0.npy
+        #        |   -- truth_data_1.npy
+        #        |   -- truth_data_2.npy
+        #
+        # Data is collected by allowing a robot to act according to some policy.
+        # Each index (0, 1, 2, etc...) corresponds to a rollout.  The data from the rollout 
+        # is factorized into 3 parts.
+        #
+        # obs is the data that could be rendered by a real robot
+        # act is the commands to the robot
+        # truth is ground truth data from the simulation
+
+        for path in self._root_paths:
+            obs_path = os.path.join(path, 'obs')
+            obs_files = os.listdir(obs_path)
+
+            for name in obs_files:
+                data = torch.from_numpy(np.load(os.path.join(obs_path, name)))
+                print(data.shape)
+                add_data = data[:,add_idx]
+
+                entry = []
+                for idx in range(self.num_images):
+                self._imagesL.append(data[:,imageL].reshape(-1, self.rows, self.cols, self.chans)/255.0)
+                self._imagesR.append(data[:,imageR].reshape(-1, self.rows, self.cols, self.chans)/255.0)
+                self._imus.append(imus)
+
+"""
+        imu_size = self.additional_dims
         imu = list(range(imu_size))
         imageL = list(range(imu_size, imu_size + image_size))
         imageR = list(range(imu_size + image_size, imu_size+2*image_size))
@@ -120,8 +97,8 @@ class SensoryData(Dataset):
                 print(data.shape)
                 imus = data[:,imu]
 
-                self._imagesL.append(data[:,imageL].reshape(-1, 100, 100, 3)/255.0)
-                self._imagesR.append(data[:,imageR].reshape(-1, 100, 100, 3)/255.0)
+                self._imagesL.append(data[:,imageL].reshape(-1, self.rows, self.cols, self.chans)/255.0)
+                self._imagesR.append(data[:,imageR].reshape(-1, self.rows, self.cols, self.chans)/255.0)
                 self._imus.append(imus)
         
         self._imagesL = torch.vstack(self._imagesL)
@@ -176,6 +153,7 @@ class SensoryData(Dataset):
     
     def __len__(self):
         return self._total_length
+"""
     
 class Sequencer(Dataset):
     def __init__(self, data_path, min_len:int = 5, max_len:int = 100):
