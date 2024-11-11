@@ -3,260 +3,95 @@ import os
 
 import torch
 from torch.utils.data import Dataset
-class SensoryData(Dataset):
-    def __init__(self, root_paths, rows=100, cols=100, chans=3, num_images=2, add_dims=6):
-        
-        ### specific to carter_Nova ###
-        # chans = 6 (two stacked images)
-        # rows = 100
-        # cols = 100
-        # imu_dims = 6
-        ##########################
-        
-        self._root_paths = root_paths
-        self._rows = rows
-        self._cols = cols
-        self._chans = chans
-        self._num_images = num_images
-        self._add_dims = add_dims
-        ##########################
-        # obs
 
-        # Assume that a single obs token consists of a sequence of flattened images
-        # prepended by "additional_dims" of float data. Assume one file is a "batch"
-        # of obs tokens. 
+def GetSubsequences(data_len, min_len, max_len):
 
-        # PER FILE [batch_length, add_dims + image_size * num_images]
+    def _getSubs(max_len, min_len):
+        max_seq = np.arange(max_len)
+        if max_len > min_len:
+            subs = []
+            for start in range(min_len, max_len+1, 1):
+                subs.append(max_seq[-start:])
+            return subs
+        else:
+            return [max_seq]
 
-        image_size = self._rows*self._cols*self._chans
-        image_idx = [list(range(self._add_dims + i*image_size, self._add_dims + i*image_size + image_size)) for i in range(self._num_images)]
-        self._images = []
+    seqs = []
 
-        add_idx = list(range(self.add_dims))
-        self._add_data = []
+    i = min_len
+    while i < max_len:
+        if i > min_len:
+            subs = _getSubs(i, min_len)
+            seqs.extend([torch.Tensor(subs[j].tolist()) for j in range(len(subs))])
+            i+=1
+            continue
+        seqs.append(torch.Tensor(list(range(i))))
+        i+=1
 
-        # Assume root directory is structured like the following 
-        #
-        #    root_path
-        #        |
-        #        -- obs
-        #        |   |
-        #        |   -- obs_data_0.npy
-        #        |   -- obs_data_1.npy
-        #        |   -- obs_data_2.npy
-        #        -- act
-        #        |   |
-        #        |   -- act_data_0.npy
-        #        |   -- act_data_1.npy
-        #        |   -- act_data_2.npy
-        #        -- truth
-        #        |   |
-        #        |   -- truth_data_0.npy
-        #        |   -- truth_data_1.npy
-        #        |   -- truth_data_2.npy
-        #
-        # Data is collected by allowing a robot to act according to some policy.
-        # Each index (0, 1, 2, etc...) corresponds to a rollout.  The data from the rollout 
-        # is factorized into 3 parts.
-        #
-        # obs is the data that could be rendered by a real robot
-        # act is the commands to the robot
-        # truth is ground truth data from the simulation
-
-        for path in self._root_paths:
-            obs_path = os.path.join(path, 'obs')
-            obs_files = os.listdir(obs_path)
-
-            for name in obs_files:
-                data = torch.from_numpy(np.load(os.path.join(obs_path, name)))
-                print(data.shape)
-                add_data = data[:,add_idx]
-
-                entry = []
-                for idx in range(self.num_images):
-                self._imagesL.append(data[:,imageL].reshape(-1, self.rows, self.cols, self.chans)/255.0)
-                self._imagesR.append(data[:,imageR].reshape(-1, self.rows, self.cols, self.chans)/255.0)
-                self._imus.append(imus)
-
-"""
-        imu_size = self.additional_dims
-        imu = list(range(imu_size))
-        imageL = list(range(imu_size, imu_size + image_size))
-        imageR = list(range(imu_size + image_size, imu_size+2*image_size))
-        
-        self._imagesL = []
-        self._imagesR = []
-        self._imus = []
-        
-        for path in root_paths:
-            obs_path = os.path.join(path, 'obs')
-            obs_files = os.listdir(obs_path)
-
-            for name in obs_files:
-                data = torch.from_numpy(np.load(os.path.join(obs_path, name)))
-                print(data.shape)
-                imus = data[:,imu]
-
-                self._imagesL.append(data[:,imageL].reshape(-1, self.rows, self.cols, self.chans)/255.0)
-                self._imagesR.append(data[:,imageR].reshape(-1, self.rows, self.cols, self.chans)/255.0)
-                self._imus.append(imus)
-        
-        self._imagesL = torch.vstack(self._imagesL)
-        self._imagesR = torch.vstack(self._imagesR)
-        self._imus = torch.vstack(self._imus)
-        
-        # standardize IMU data
-        self._imu_mean = torch.mean(self._imus, dim=0).unsqueeze(0)
-        self._imu_stdv = torch.std(self._imus, dim=0).unsqueeze(0)
-        self._imus = (self._imus - self._imu_mean) / self._imu_stdv
-        self._imus = torch.sigmoid(self._imus)
-
-        print(self._imagesL.shape)
-        self._total_length = self._imagesL.shape[0]
-
-        ##########################
-        # act
-        self._acts = []
-
-        for path in root_paths:
-            act_path = os.path.join(path, 'act')
-            act_files = os.listdir(act_path)
-            for name in act_files:
-                data = torch.from_numpy(np.load(os.path.join(act_path, name)))
-                self._acts.append(data)
-        
-        self._acts = torch.vstack(self._acts)
-
-        ##########################
-        # truth
-        self._truths = []
-        self._num_runs = 0
-        for i, path in enumerate(root_paths):
-            truth_path = os.path.join(path, 'truth')
-            truth_files = os.listdir(truth_path)
-            for j, name in enumerate(truth_files):
-                data = torch.from_numpy(np.load(os.path.join(truth_path, name)))
-                index = self._num_runs*torch.ones((data.shape[0],1)).int()
-                data = torch.hstack((index, data))
-                self._truths.append(data)
-                self._num_runs += 1
-        
-        self._truths = torch.vstack(self._truths)
-
-        assert self._total_length == self._acts.shape[0] == self._truths.shape[0]
-
+    subs =_getSubs(max_len, min_len)
     
-    def __getitem__(self, index):
-        L = torch.permute(self._imagesL[index],(2,0,1)).float()
-        R = torch.permute(self._imagesR[index], (2,0,1)).float()
-        return torch.vstack([L,R]), self._imus[index], self._acts[index], self._truths[index]
-    
-    def __len__(self):
-        return self._total_length
-"""
-    
-class Sequencer(Dataset):
-    def __init__(self, data_path, min_len:int = 5, max_len:int = 100):
-        self.data_path = data_path
-        self._min_len = min_len
-        self._max_len = max_len
-        names = os.listdir(data_path)
-        self._X = []
-        self._A = []
-        self._T = []
-        self._L = []
-        
-        for name in names:
-            data = np.load(os.path.join(data_path, name))
-            if data['X'].shape[0] <= self._min_len:
-                continue
-            self._X.append(torch.from_numpy(data['X']))
-            self._A.append(torch.from_numpy(data['A']))
-            self._T.append(torch.from_numpy(data['T']))
-            self._L.append(data['X'].shape[0])
-        
-        self._num_files = len(self._X) 
-        
-        self._sequences = {}
-        self._num_seqs = [] 
-        total_seqs = 0
-        for i in range(self._num_files):
-            print("processing file {0}".format(i))
-            start = 0
-            stop = self._min_len
-            seqs = []
-            new_file = True
-            while True:
-                if not new_file and start + self._min_len == stop:
-                    break
-                
-                new_file = False
-                diff = stop - start
-                test = self._min_len <= diff < self._max_len
-                # if not test:
-                #    print(self._min_len, diff, self._max_len)
-                seqs.append(torch.arange(start,stop))
-                total_seqs += 1
-                if self._min_len <= diff and diff < self._max_len:
-                    if stop+1 <= self._L[i]:
-                        stop+=1
-                        continue
-                    else:
-                        start += 1
-                        continue
-                else:
-                    start += 1
-                    if stop+1 < self._L[i]:
-                        stop+=1
-            self._sequences[i] = seqs
-            self._num_seqs.append(len(seqs))
-        self._total_length = np.sum(self._num_seqs)
-        print(self._total_length, " total sequences")
+    for i in range(data_len-max_len+1):
+        seqs.extend([torch.Tensor((subs[j]+i).tolist()) for j in range(len(subs))])
 
-    def indexToSequenceID(self, index):
-        for i in range(len(self._num_seqs)):
-            num = self._num_seqs[i]
-            if index < num:
-                return i, index
-            index -= num
-            
-    def __getitem__(self, index):
-        run, idx = self.indexToSequenceID(index)
-        sequence = self._sequences[run][idx]
-        X = self._X[run][sequence]
-        A = self._A[run][sequence]
-        T = self._T[run][sequence]
-        return X.float(), A.float(), T.float()
-    
-    def __len__(self):
-        return self._total_length 
-    
-    def num_runs(self):
-        return len(self._X)
-
-    def get_run(self, run):
-        X = self._X[run]
-        A = self._A[run]
-        T = self._T[run]
-        return X.float(), A.float(), T.float()
+    return seqs
 
 class ImageSequencer(Dataset):
-    def __init__(self, root_paths, min_len:int = 5, max_len:int = 100, image_rows:int = 224, image_cols:int = 224, image_chans:int = 3, imu_size:int = 6):
+    def __init__(self, root_paths, min_len:int = 5, max_len:int = 100, image_rows:int = 224, image_cols:int = 224, image_chans:int = 3, num_images=2, add_dims=6):
+        
         self._root_paths = root_paths
         self._min_len = min_len
         self._max_len = max_len
         self._image_rows = image_rows
         self._image_cols = image_cols
         self._image_chans = image_chans
-        self._imu_dim = imu_size
+        self._num_images = num_images
+        self._add_dims = add_dims
 
-        # setting up indexers for the 
-        image_size = image_cols*image_rows*image_chans
-        imu_idx = list(range(imu_size))
-        image_idx = list(range(imu_size, imu_size + image_size))
+        """
+        Assume root directory is structured like the following 
+        
+           root_path
+               |
+               -- obs
+               |   |
+               |   -- obs_data_0.npy
+               |   -- obs_data_1.npy
+               |   -- obs_data_2.npy
+               -- act
+               |   |
+               |   -- act_data_0.npy
+               |   -- act_data_1.npy
+               |   -- act_data_2.npy
+               -- truth
+               |   |
+               |   -- truth_data_0.npy
+               |   -- truth_data_1.npy
+               |   -- truth_data_2.npy
+        
+        Data is collected by allowing a robot to act according to some policy.
+        Each index (0, 1, 2, etc...) corresponds to a rollout or "run".  The data from the run
+        is factorized into 3 parts.
+        
+        obs is the data that could be rendered by a real robot
+        act is the commands to the robot
+        truth is ground truth data from the simulation
 
+        Assume that a single obs token consists of a sequence of flattened images
+        prepended by "additional_dims" of float data, and that the number of entries in the file 
+        is the "length" of the run.
+
+        PER FILE [run_length, add_dims + image_size * num_images]
+        idx is the index of the specific parts of the entry corresponding to specific data.  It's 
+        where that data is located in the entry
+        """
+
+        add_idx = list(range(self._add_dims))
+        self._image_size = self._image_rows*self._image_cols*self._image_chans
+        self._image_idx = [list(range(self._add_dims + i*self._image_size, self._add_dims + i*self._image_size + self._image_size)) for i in range(self._num_images)]
+        
+        
         self._images = []
-        self._imus = []
+        self._add_data = []
         self._acts = []
         self._truths = []
 
@@ -273,74 +108,94 @@ class ImageSequencer(Dataset):
             truth_files = os.listdir(truth_path)
             
             for (obs_name, act_name, truth_name) in zip(obs_files, act_files, truth_files):
-                obs_data   = torch.from_numpy(np.load(os.path.join(obs_path, obs_name)))
+                # load data from the files, skipping runs that are too short to consider
+                obs_data = torch.from_numpy(np.load(os.path.join(obs_path, obs_name)))
                 if obs_data.shape[0] < self._min_len:
                     continue
                 act_data   = torch.from_numpy(np.load(os.path.join(act_path, act_name)))
-                truth_data = torch.from_numpy(np.load(os.path.join(truth_path, truth_name)))
-                # print(obs_data.shape, act_data.shape, truth_data.shape)    
-                imus = obs_data[:,imu_idx]
-                image = obs_data[:,image_idx].reshape(-1, self._image_rows, self._image_cols, self._image_chans)/255.0
-                image = torch.clamp(image, 0, 1)
-                assert torch.min(image) >= 0
-                self._images.append(image.permute(0,3,1,2))
-                self._imus.append(imus)
-                
+                truth_data = torch.from_numpy(np.load(os.path.join(truth_path, truth_name)))   
+                add_data = obs_data[:,add_idx]
+
+                #unflatten.  I know how the data was packed, so I can unpack it... I wish there was a way to define this in the file so it happens automagically...
+                images = []
+                for idx in self._image_idx:
+                    image = obs_data[:,idx].reshape(-1, self._image_rows, self._image_cols, self._image_chans)/255.0
+                    images.append(image)
+                images = torch.stack(images, dim=1)
+                images = torch.clamp(images, 0, 1)
+                assert torch.min(images) >= 0
+
+                self._images.append(images)
+                self._add_data.append(add_data)
                 self._acts.append(act_data)
                 
                 index = self._num_runs*torch.ones((truth_data.shape[0],1)).int()
-                data = torch.hstack((index, truth_data))
+                truth_data = torch.hstack((index, truth_data))
                 self._truths.append(truth_data)
                 
                 self._num_runs += 1
-                
-        #self._images = torch.vstack(self._images)
-        #self._imus = torch.vstack(self._imus)
-        #self._acts = torch.vstack(self._acts)
-        #self._truths = torch.vstack(self._truths)
 
         self._sequences = {}
         self._num_seqs = []
-        self._total_sequences = 0
         total_seqs =0
         
+        """
+        The data provided by the sequencer are sequences.  These sequences exist as lists of integers (idx) in a dictionary, 
+        to be indexed at random in order to create a single batch of data.
+
+        A run may be much longer or shorter than the max length provided to the sequencer, but it cannot be
+        shorter than the minimum length.  Consider the following run of data
+        
+        A B C D E F G H I J 
+        0 1 2 3 4 5 6 7 8 9 
+        
+        We want to make a list of all valid sequences in this run with a min sequence length of 3 and a 
+        max length of 5.  The first sequence is always a sequence of the minimum length, in this case, ABC
+
+        A B C D E F G H I J 
+        0 1 2 3 4 5 6 7 8 9 
+        |---|
+
+        We can then extend and slide this window to the end of the run, generating sequences with each step and 
+        shrinking it at the end
+
+            A B C D E F G H I J 
+            0 1 2 3 4 5 6 7 8 9 
+         1  |---|                                                                                                  
+         2  |-----|  
+         3    |---|                                                                         
+         4  |-------|            <- max length                                                                        
+         5    |-----|                                                                              
+         6      |---|     
+         7    |-------|          <- max length                                                                       
+         8      |-----|                                                                              
+         9        |---|    
+        10      |-------|        <- max length                                                                         
+        11        |-----|                                                                              
+        12          |---|  
+        13        |-------|      <- max length                                                                           
+        14          |-----|                                                                              
+        15            |---|  
+        16          |-------|    <- max length                                                                             
+        17            |-----|                                                                              
+        18              |---|                                                 
+        19            |-------|  <- max length                                                                               
+        20              |-----|                                                                              
+        21                |---|                                                        
+
+        These are all possible unique contiguous subsequences of the example run.
+        """
+
         for i in range(self._num_runs):
-            print("processing file {0} of length {1}".format(i, self._images[i].shape[0]))
-            start = 0
-            stop = self._min_len
-            seqs = []
-            new_run = True
+            print("sequencing file {0} of length {1}".format(i, self._images[i].shape[0]))
             run_length = self._images[i].shape[0]
             
-            while True:
-                if not new_run and start + self._min_len >= stop:
-                    break
-                    
-                new_run = False
-                diff = stop - start
-                
-                test = self._min_len <= diff < self._max_len
-                #if not test:
-                #    print(self._min_len, diff, self._max_len, start, stop)
+            seqs = GetSubsequences(run_length, self._min_len, self._max_len)
 
-                seqs.append(torch.arange(start, stop))
-                total_seqs += 1
-                
-                if self._min_len <= diff and diff < self._max_len:
-                    if stop+1 <= run_length:
-                        stop +=1
-                        continue
-                    else:
-                        start +=1
-                        continue
-                else:
-                    start += 1
-                    if stop+1 < run_length:
-                        stop+=1
             self._sequences[i] = seqs
             self._num_seqs.append(len(seqs))
         self._total_sequences = np.sum(self._num_seqs)
-        print(self._total_sequences, total_seqs)
+        print(self._total_sequences)
     
     def indexToSequenceID(self, index):
         for i in range(len(self._num_seqs)):
